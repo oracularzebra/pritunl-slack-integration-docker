@@ -81,19 +81,21 @@ services:
 
 ### Running with Docker Run (privileged)
 
-For OpenVPN restart to work, the container needs host PID namespace and /proc access:
+For OpenVPN restart to work, the container needs host PID namespace and /proc access.
+
+If MongoDB is bound to `127.0.0.1` on the host (common for Pritunl), use `--network=host` so the container's `localhost` maps to the host's loopback. With `--network=host`, `MONGODB_URI` should use `localhost` and port mapping (`-p`) is not needed — the app listens on the host's IP directly.
 
 ```bash
-docker run -d --rm \
-  --name pritunl-slack \
+docker run -d --name pritunl-slack \
+  --network=host \
   --pid=host \
   --privileged \
   -v /proc:/proc:ro \
   -v $(pwd)/config.json:/app/config.json:ro \
   -v $(pwd)/hostnames.json:/app/hostnames.json:ro \
-  -e MONGODB_URI="mongodb://your-mongo:27017" \
+  -v /var/log/pritunl-docker:/var/log/pritunl-docker \
+  -e MONGODB_URI="mongodb://localhost:27017" \
   -e SLACK_WEBHOOK_URL="https://hooks.slack.com/..." \
-  -p 5001:5001 \
   pritunl-slack
 ```
 
@@ -195,15 +197,15 @@ Pritunl manages OpenVPN as a child process. The `restart_mode` field controls ho
 
 ## Logging
 
+All logs are written to `/var/log/pritunl-docker/` on the host (mount this volume when running the container).
+
 ```bash
 # Poller logs
-docker logs pritunl-slack
+tail -f /var/log/pritunl-docker/route-updater.log
 
-# Webhook access logs
-docker exec pritunl-slack tail -f /var/log/pritunl-webhook-access.log
-
-# Webhook error logs
-docker exec pritunl-slack tail -f /var/log/pritunl-webhook-error.log
+# Webhook server logs
+tail -f /var/log/pritunl-docker/webhook-access.log
+tail -f /var/log/pritunl-docker/webhook-error.log
 ```
 
 ## Verification

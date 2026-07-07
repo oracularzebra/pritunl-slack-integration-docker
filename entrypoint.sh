@@ -18,9 +18,11 @@ trap cleanup TERM INT
 
 export CONFIG_PATH
 
+mkdir -p /var/log/pritunl-docker
+
 gunicorn -b 0.0.0.0:5001 \
-    --access-logfile - \
-    --error-logfile - \
+    --access-logfile /var/log/pritunl-docker/webhook-access.log \
+    --error-logfile /var/log/pritunl-docker/webhook-error.log \
     --log-level info \
     --timeout 30 \
     webhook_server:app &
@@ -29,6 +31,6 @@ GUNICORN_PID=$!
 sleep 2
 
 while true; do
-    python update_routes.py --config "$CONFIG_PATH" 2>&1
+    python update_routes.py --config "$CONFIG_PATH" >> /var/log/pritunl-docker/pritunl-route-updater.log 2>&1
     sleep "$POLLER_INTERVAL"
 done
