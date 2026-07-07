@@ -1,0 +1,21 @@
+services:
+  pritunl-slack:
+    build: .
+    container_name: pritunl-slack
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - CONFIG_PATH=/app/config.json
+      - MONGODB_URI=${MONGODB_URI:-mongodb://host.docker.internal:27017}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - POLLER_INTERVAL=${POLLER_INTERVAL:-10}
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./hostnames.json:/app/hostnames.json:ro
+      - pending_data:/tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pending_data:

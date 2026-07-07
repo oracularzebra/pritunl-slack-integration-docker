@@ -1,0 +1,12 @@
+.venv
+.git
+.gitignore
+*.md
+config.json
+hostnames.json
+pritunl-route-updater.service
+pritunl-route-updater.timer
+update_alb_routes.py
+pritunl-webhook.service
+__pycache__
+*.pyc

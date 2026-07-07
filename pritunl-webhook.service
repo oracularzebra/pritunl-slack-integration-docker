@@ -1,0 +1,14 @@
+[Unit]
+Description=Pritunl Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Environment=CONFIG_PATH=/root/pritunl-host-update-automation/config.json
+WorkingDirectory=/root/pritunl-host-update-automation
+ExecStart=/bin/sh -c '/root/pritunl-host-update-automation/.venv/bin/gunicorn -b 0.0.0.0:5001 --access-logfile /var/log/pritunl-webhook-access.log --error-logfile /var/log/pritunl-webhook-error.log webhook_server:app >> /var/log/pritunl-webhook.log 2>&1'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
