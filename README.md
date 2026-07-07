@@ -92,7 +92,7 @@ docker run -d --name pritunl-slack \
   --privileged \
   -v /proc:/proc:ro \
   -v $(pwd)/config.json:/app/config.json:ro \
-  -v $(pwd)/hostnames.json:/app/hostnames.json:ro \
+  -v $(pwd)/hostnames.json:/app/hostnames.json \
   -v /var/log/pritunl-docker:/var/log/pritunl-docker \
   -e MONGODB_URI="mongodb://localhost:27017" \
   pritunl-slack

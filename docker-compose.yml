@@ -12,7 +12,7 @@ services:
       - POLLER_INTERVAL=${POLLER_INTERVAL:-10}
     volumes:
       - ./config.json:/app/config.json:ro
-      - ./hostnames.json:/app/hostnames.json:ro
+      - ./hostnames.json:/app/hostnames.json
       - pending_data:/tmp
     extra_hosts:
       - "host.docker.internal:host-gateway"
