@@ -117,6 +117,13 @@ def get_server():
     return server
 
 
+def _check_channel(channel_id):
+    allowed = config.get("slack_channel_id", "")
+    if allowed and channel_id != allowed:
+        log.warning("Command from unauthorized channel %s", channel_id)
+        abort(403, description="This app is restricted to a specific channel.")
+
+
 def get_server_name():
     return config.get("server_name", "unknown")
 
@@ -256,6 +263,8 @@ def slack_command():
     if not verify_slack_request():
         abort(403)
 
+    _check_channel(request.form.get("channel_id", ""))
+
     cmd_text = request.form.get("text", "").strip()
     parts = cmd_text.split()
     command = parts[0] if parts else "list"
@@ -373,6 +382,7 @@ def slack_interactive():
         abort(403)
 
     payload = json.loads(request.form.get("payload", "{}"))
+    _check_channel(payload.get("channel", {}).get("id", ""))
     action = payload.get("actions", [{}])[0]
     action_id = action.get("action_id", "")
     value = action.get("value", "")
