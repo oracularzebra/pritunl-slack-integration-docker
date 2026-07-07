@@ -95,7 +95,6 @@ docker run -d --name pritunl-slack \
   -v $(pwd)/hostnames.json:/app/hostnames.json:ro \
   -v /var/log/pritunl-docker:/var/log/pritunl-docker \
   -e MONGODB_URI="mongodb://localhost:27017" \
-  -e SLACK_WEBHOOK_URL="https://hooks.slack.com/..." \
   pritunl-slack
 ```
 
