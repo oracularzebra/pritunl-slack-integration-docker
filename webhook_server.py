@@ -298,6 +298,9 @@ def slack_command():
         if len(parts) < 2:
             return jsonify({"response_type": "in_channel", "text": "Usage: `/routes add <network> [comment]`"})
         network = parts[1]
+        import re
+        if re.search(r'[a-zA-Z]', network) and '/' not in network:
+            return jsonify({"response_type": "in_channel", "text": f"`{network}` looks like a hostname. Use `/routes watch {network}` to track a DNS hostname, not `/routes add`."})
         comment = " ".join(parts[2:]) if len(parts) > 2 else ""
         if any(r["network"] == network for r in routes):
             return jsonify({"response_type": "in_channel", "text": f"Route `{network}` already exists."})
