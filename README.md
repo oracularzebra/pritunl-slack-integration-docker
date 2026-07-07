@@ -106,6 +106,7 @@ docker run -d --name pritunl-slack \
 | `MONGODB_URI` | `mongodb://host.docker.internal:27017` | MongoDB connection string |
 | `SLACK_WEBHOOK_URL` | `""` | Slack incoming webhook URL |
 | `POLLER_INTERVAL` | `10` | Poller loop interval in seconds |
+| `LOG_DIR` | `/var/log/pritunl-docker` | Directory for Python script logs (route-updater.log, webhook-server.log) |
 
 ### Building the Image
 

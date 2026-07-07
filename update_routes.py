@@ -11,7 +11,16 @@ from copy import deepcopy
 import requests
 from pymongo import MongoClient
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log_dir = os.environ.get("LOG_DIR")
+if log_dir:
+    os.makedirs(log_dir, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        filename=os.path.join(log_dir, "route-updater.log"),
+    )
+else:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 
