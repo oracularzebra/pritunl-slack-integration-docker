@@ -131,121 +131,121 @@ def health():
 
 
 # ─── Hostname Management ─────────────────────────────────────
+# 
+# 
+# @app.route("/api/hostnames", methods=["GET"])
+# def list_hostnames():
+#     return jsonify({"hostnames": _hostnames})
 
 
-@app.route("/api/hostnames", methods=["GET"])
-def list_hostnames():
-    return jsonify({"hostnames": _hostnames})
+# @app.route("/api/hostnames", methods=["POST"])
+# def add_hostname():
+#     data = request.get_json(force=True)
+#     hostname = data.get("hostname")
+#     if not hostname:
+#         abort(400, description="'hostname' is required")
+#     if hostname in _hostnames:
+#         abort(409, description=f"Hostname {hostname} already tracked")
+#     _hostnames.append(hostname)
+#     _write_hostnames()
+#     log.info("Hostname added: %s", hostname)
+#     return jsonify({"hostname": hostname, "hostnames": _hostnames}), 201
 
 
-@app.route("/api/hostnames", methods=["POST"])
-def add_hostname():
-    data = request.get_json(force=True)
-    hostname = data.get("hostname")
-    if not hostname:
-        abort(400, description="'hostname' is required")
-    if hostname in _hostnames:
-        abort(409, description=f"Hostname {hostname} already tracked")
-    _hostnames.append(hostname)
-    _write_hostnames()
-    log.info("Hostname added: %s", hostname)
-    return jsonify({"hostname": hostname, "hostnames": _hostnames}), 201
+# @app.route("/api/hostnames", methods=["DELETE"])
+# def delete_hostname():
+#     data = request.get_json(force=True)
+#     hostname = data.get("hostname")
+#     if not hostname:
+#         abort(400, description="'hostname' is required")
+#     if hostname not in _hostnames:
+#         abort(404, description=f"Hostname {hostname} not found")
+#     _hostnames.remove(hostname)
+#     _write_hostnames()
+
+#     comment_tag = f"dns:{hostname}"
+#     server = get_server()
+#     routes = server.get("routes", [])
+#     new_routes = [r for r in routes if r.get("comment") != comment_tag]
+#     removed = len(routes) - len(new_routes)
+#     if removed:
+#         collection.update_one(
+#             {"name": get_server_name()}, {"$set": {"routes": new_routes}}
+#         )
+#         log.info("Removed %d route(s) for %s", removed, hostname)
+
+#     log.info("Hostname deleted: %s", hostname)
+#     return jsonify({"hostname": hostname, "hostnames": _hostnames, "routes_removed": removed})
 
 
-@app.route("/api/hostnames", methods=["DELETE"])
-def delete_hostname():
-    data = request.get_json(force=True)
-    hostname = data.get("hostname")
-    if not hostname:
-        abort(400, description="'hostname' is required")
-    if hostname not in _hostnames:
-        abort(404, description=f"Hostname {hostname} not found")
-    _hostnames.remove(hostname)
-    _write_hostnames()
-
-    comment_tag = f"dns:{hostname}"
-    server = get_server()
-    routes = server.get("routes", [])
-    new_routes = [r for r in routes if r.get("comment") != comment_tag]
-    removed = len(routes) - len(new_routes)
-    if removed:
-        collection.update_one(
-            {"name": get_server_name()}, {"$set": {"routes": new_routes}}
-        )
-        log.info("Removed %d route(s) for %s", removed, hostname)
-
-    log.info("Hostname deleted: %s", hostname)
-    return jsonify({"hostname": hostname, "hostnames": _hostnames, "routes_removed": removed})
+# # ─── REST API ────────────────────────────────────────────────
 
 
-# ─── REST API ────────────────────────────────────────────────
+# @app.route("/api/routes", methods=["GET"])
+# def list_routes():
+#     server = get_server()
+#     return jsonify(server.get("routes", []))
 
 
-@app.route("/api/routes", methods=["GET"])
-def list_routes():
-    server = get_server()
-    return jsonify(server.get("routes", []))
+# @app.route("/api/routes", methods=["POST"])
+# def add_route():
+#     data = request.get_json(force=True)
+#     network = data.get("network")
+#     if not network:
+#         abort(400, description="'network' is required")
+#     route = {
+#         "network": network,
+#         "comment": data.get("comment", ""),
+#         "nat": data.get("nat", True),
+#     }
+#     server = get_server()
+#     routes = server.get("routes", [])
+#     if any(r["network"] == network for r in routes):
+#         abort(409, description=f"Route {network} already exists")
+#     routes.append(route)
+#     collection.update_one({"name": get_server_name()}, {"$set": {"routes": routes}})
+#     log.info("Route added: %s", network)
+#     return jsonify(route), 201
 
 
-@app.route("/api/routes", methods=["POST"])
-def add_route():
-    data = request.get_json(force=True)
-    network = data.get("network")
-    if not network:
-        abort(400, description="'network' is required")
-    route = {
-        "network": network,
-        "comment": data.get("comment", ""),
-        "nat": data.get("nat", True),
-    }
-    server = get_server()
-    routes = server.get("routes", [])
-    if any(r["network"] == network for r in routes):
-        abort(409, description=f"Route {network} already exists")
-    routes.append(route)
-    collection.update_one({"name": get_server_name()}, {"$set": {"routes": routes}})
-    log.info("Route added: %s", network)
-    return jsonify(route), 201
+# @app.route("/api/routes/<path:network>", methods=["PUT"])
+# def update_route(network):
+#     data = request.get_json(force=True)
+#     server = get_server()
+#     routes = server.get("routes", [])
+#     for route in routes:
+#         if route["network"] == network:
+#             route["comment"] = data.get("comment", route.get("comment", ""))
+#             route["nat"] = data.get("nat", route.get("nat", True))
+#             break
+#     else:
+#         abort(404, description=f"Route {network} not found")
+#     collection.update_one({"name": get_server_name()}, {"$set": {"routes": routes}})
+#     log.info("Route updated: %s", network)
+#     return jsonify({"status": "updated"})
 
 
-@app.route("/api/routes/<path:network>", methods=["PUT"])
-def update_route(network):
-    data = request.get_json(force=True)
-    server = get_server()
-    routes = server.get("routes", [])
-    for route in routes:
-        if route["network"] == network:
-            route["comment"] = data.get("comment", route.get("comment", ""))
-            route["nat"] = data.get("nat", route.get("nat", True))
-            break
-    else:
-        abort(404, description=f"Route {network} not found")
-    collection.update_one({"name": get_server_name()}, {"$set": {"routes": routes}})
-    log.info("Route updated: %s", network)
-    return jsonify({"status": "updated"})
+# @app.route("/api/routes/<path:network>", methods=["DELETE"])
+# def delete_route(network):
+#     server = get_server()
+#     routes = server.get("routes", [])
+#     new_routes = [r for r in routes if r["network"] != network]
+#     if len(new_routes) == len(routes):
+#         abort(404, description=f"Route {network} not found")
+#     collection.update_one(
+#         {"name": get_server_name()}, {"$set": {"routes": new_routes}}
+#     )
+#     log.info("Route deleted: %s", network)
+#     return jsonify({"status": "deleted"})
 
 
-@app.route("/api/routes/<path:network>", methods=["DELETE"])
-def delete_route(network):
-    server = get_server()
-    routes = server.get("routes", [])
-    new_routes = [r for r in routes if r["network"] != network]
-    if len(new_routes) == len(routes):
-        abort(404, description=f"Route {network} not found")
-    collection.update_one(
-        {"name": get_server_name()}, {"$set": {"routes": new_routes}}
-    )
-    log.info("Route deleted: %s", network)
-    return jsonify({"status": "deleted"})
-
-
-@app.route("/api/restart", methods=["POST"])
-def restart_openvpn():
-    from update_routes import restart_openvpn as do_restart
-    restart_mode = config.get("restart_mode", "openvpn_only")
-    restart_cmd = config.get("openvpn_restart_cmd", "sudo systemctl restart pritunl")
-    do_restart(restart_mode, restart_cmd)
-    return jsonify({"status": "restarted"})
+# @app.route("/api/restart", methods=["POST"])
+# def restart_openvpn():
+#     from update_routes import restart_openvpn as do_restart
+#     restart_mode = config.get("restart_mode", "openvpn_only")
+#     restart_cmd = config.get("openvpn_restart_cmd", "sudo systemctl restart pritunl")
+#     do_restart(restart_mode, restart_cmd)
+#     return jsonify({"status": "restarted"})
 
 
 # ─── Slack Slash Command ─────────────────────────────────────
