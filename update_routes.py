@@ -185,7 +185,6 @@ def main():
     hostnames = load_hostnames(config, args)
     slack_webhook = config.get("slack_webhook") or os.environ.get("SLACK_WEBHOOK_URL", "")
     pending_file = config.get("pending_file", "/tmp/pending_routes.json")
-    rejected_file = pending_file.replace("pending_", "rejected_")
     restart_mode = config.get("restart_mode", "openvpn_only")
     restart_cmd = config.get(
         "openvpn_restart_cmd",
@@ -271,34 +270,31 @@ def main():
         log.info("No changes detected for any hostname")
         return
 
-    # Check if same changes were already rejected — don't re-notify until DNS changes again
-    if os.path.exists(rejected_file):
-        try:
-            with open(rejected_file) as f:
-                rejected = json.load(f)
-            if rejected.get("routes") == new_routes_all:
-                log.info("Changes match previously rejected state — skipping notification")
-                return
-        except (json.JSONDecodeError, IOError):
-            log.warning("Could not read rejected state file")
-
-    # Check if same changes are already pending — skip duplicate notifications
-    if os.path.exists(pending_file):
-        try:
-            with open(pending_file) as f:
-                existing = json.load(f)
-            if existing.get("routes") == new_routes_all:
-                log.info("Changes already pending in %s — skipping duplicate notification", pending_file)
-                return
-            log.info("Pending file exists but routes differ — updating")
-        except (json.JSONDecodeError, IOError):
-            log.warning("Could not read existing pending file — will overwrite")
-
     pending = {
         "routes": new_routes_all,
         "changes": changes,
         "server_name": server_name,
     }
+
+    # Check if same changes are already pending — resend notification
+    if os.path.exists(pending_file):
+        try:
+            with open(pending_file) as f:
+                existing = json.load(f)
+            if existing.get("routes") == new_routes_all:
+                log.info("Changes already pending — re-sending notification")
+                if slack_webhook:
+                    try:
+                        send_slack_interactive(slack_webhook, changes, server_name, pending_file)
+                        log.info("Interactive Slack notification re-sent — awaiting approval")
+                    except Exception as e:
+                        log.error("Failed to re-send Slack notification: %s", e)
+                return
+            log.warning("Pending file exists with different routes — skipping to avoid race (wait for current approval/rejection)")
+            return
+        except (json.JSONDecodeError, IOError):
+            log.warning("Could not read existing pending file — will overwrite")
+
     with open(pending_file, "w") as f:
         json.dump(pending, f, indent=2)
     log.info("Pending changes saved to %s", pending_file)
@@ -309,6 +305,8 @@ def main():
             log.info("Interactive Slack notification sent — awaiting approval")
         except Exception as e:
             log.error("Failed to send Slack notification: %s", e)
+            os.remove(pending_file)
+            log.info("Removed pending file %s due to send failure — will retry next cycle", pending_file)
     else:
         log.info("No Slack webhook configured, changes remain pending in %s", pending_file)
 

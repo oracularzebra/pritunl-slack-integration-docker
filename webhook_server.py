@@ -445,9 +445,6 @@ def _handle_approve(pending_file, response_url, user_name):
         do_restart(restart_mode, restart_cmd)
 
         os.remove(pending_file)
-        rejected_file = pending_file.replace("pending_", "rejected_")
-        if os.path.exists(rejected_file):
-            os.remove(rejected_file)
         _update_slack(response_url, "\n\n".join(lines))
         log.info("Route changes approved by %s", user_name)
     except FileNotFoundError:
@@ -460,18 +457,14 @@ def _handle_approve(pending_file, response_url, user_name):
 
 def _handle_reject(pending_file, response_url, user_name):
     pending_file = pending_file or config.get("pending_file", "/tmp/pending_routes.json")
-    rejected_file = pending_file.replace("pending_", "rejected_")
     try:
         _update_slack(response_url, f"⏳ *Rejection by {user_name} in progress...*")
 
         with open(pending_file) as f:
-            rejected_state = json.load(f)
-        with open(rejected_file, "w") as f:
-            json.dump(rejected_state, f, indent=2)
+            state = json.load(f)
         os.remove(pending_file)
-        log.info("Rejected state saved to %s", rejected_file)
 
-        changes = rejected_state.get("changes", [])
+        changes = state.get("changes", [])
         lines = [f"❌ *Route changes rejected by {user_name}.*"]
         for c in changes:
             hostname = c["hostname"]
