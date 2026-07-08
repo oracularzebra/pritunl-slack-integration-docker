@@ -121,8 +121,9 @@ docker build -t pritunl-slack .
 3. Compares with existing routes in MongoDB (matched by `comment: "dns:<hostname>"`)
 4. If any hostname's IPs changed, saves pending routes to a file and sends an interactive Slack message with **Approve** / **Reject** buttons
 5. Clicking **Approve** applies the new routes to MongoDB, restarts OpenVPN, and removes the pending file
-6. Clicking **Reject** saves the rejected state to a cache file (`rejected_routes.json`) so the same changes won't trigger a new notification — only a DNS change to different IPs will re-trigger
+6. Clicking **Reject** removes the pending file — the poller will notify again on the next cycle if the same change is still detected
 7. Only routes matching tracked hostnames are touched — other routes are left intact
+8. The poller will not overwrite a pending file with different routes (avoids race where approval reads wrong data). If changes match what's already pending, it re-sends the notification instead of skipping
 
 ## Configuration
 
@@ -194,6 +195,8 @@ Pritunl manages OpenVPN as a child process. The `restart_mode` field controls ho
 /routes watch my-alb.elb.amazonaws.com    — start tracking
 /routes unwatch my-alb.elb.amazonaws.com  — stop tracking
 ```
+
+> Input is sanitised automatically — backticks, asterisks, underscores, quotes, and `https://` prefixes are stripped so you can paste hostnames directly from Slack messages without worrying about formatting.
 
 ## Logging
 
