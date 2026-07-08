@@ -4,6 +4,7 @@ import json
 import hmac
 import hashlib
 import logging
+import re
 import threading
 from copy import deepcopy
 
@@ -45,9 +46,9 @@ def _load_hostnames():
     path = _hostnames_path or _default_hostnames_path()
     if os.path.exists(path):
         with open(path) as f:
-            _hostnames = json.load(f)
+            _hostnames = [_sanitize(h) for h in json.load(f)]
     else:
-        _hostnames = config.get("hostnames", [])
+        _hostnames = [_sanitize(h) for h in config.get("hostnames", [])]
     _hostnames_path = path
 
 
@@ -126,6 +127,13 @@ def _check_channel(channel_id):
 
 def get_server_name():
     return config.get("server_name", "unknown")
+
+
+def _sanitize(text):
+    text = text.strip()
+    text = re.sub(r'^https?://', '', text)
+    text = re.sub(r'[*_`"\']', '', text)
+    return text.strip()
 
 
 # ─── Health Check ────────────────────────────────────────────
@@ -297,11 +305,10 @@ def slack_command():
     elif command == "add":
         if len(parts) < 2:
             return jsonify({"response_type": "in_channel", "text": "Usage: `/routes add <network> [comment]`"})
-        network = parts[1]
-        import re
+        network = _sanitize(parts[1])
         if re.search(r'[a-zA-Z]', network) and '/' not in network:
             return jsonify({"response_type": "in_channel", "text": f"`{network}` looks like a hostname. Use `/routes watch {network}` to track a DNS hostname, not `/routes add`."})
-        comment = " ".join(parts[2:]) if len(parts) > 2 else ""
+        comment = _sanitize(" ".join(parts[2:])) if len(parts) > 2 else ""
         if any(r["network"] == network for r in routes):
             return jsonify({"response_type": "in_channel", "text": f"Route `{network}` already exists."})
         route = {"network": network, "comment": comment, "nat": True}
@@ -314,7 +321,7 @@ def slack_command():
     elif command == "delete":
         if len(parts) < 2:
             return jsonify({"response_type": "in_channel", "text": "Usage: `/routes delete <network>`"})
-        network = parts[1]
+        network = _sanitize(parts[1])
         new_routes = [r for r in routes if r["network"] != network]
         if len(new_routes) == len(routes):
             return jsonify({"response_type": "in_channel", "text": f"Route `{network}` not found."})
@@ -332,7 +339,7 @@ def slack_command():
     elif command == "watch":
         if len(parts) < 2:
             return jsonify({"response_type": "in_channel", "text": "Usage: `/routes watch <hostname>`"})
-        hostname = parts[1]
+        hostname = _sanitize(parts[1])
         if hostname in _hostnames:
             return jsonify({"response_type": "in_channel", "text": f"`{hostname}` is already being watched."})
         _hostnames.append(hostname)
@@ -342,7 +349,7 @@ def slack_command():
     elif command == "unwatch":
         if len(parts) < 2:
             return jsonify({"response_type": "in_channel", "text": "Usage: `/routes unwatch <hostname>`"})
-        hostname = parts[1]
+        hostname = _sanitize(parts[1])
         if hostname not in _hostnames:
             return jsonify({"response_type": "in_channel", "text": f"`{hostname}` is not being watched."})
         _hostnames.remove(hostname)
