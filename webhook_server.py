@@ -130,10 +130,7 @@ def get_server_name():
 
 
 def _sanitize(text):
-    text = text.strip()
-    text = re.sub(r'^https?://', '', text)
-    text = re.sub(r'[*_`"\']', '', text)
-    return text.strip()
+    return text.strip().rstrip("/")
 
 
 # ─── Health Check ────────────────────────────────────────────
