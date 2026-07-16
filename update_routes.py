@@ -270,9 +270,24 @@ def main():
         log.info("No changes detected for any hostname")
         return
 
+    # Build per-hostname new routes for each change
+    change_entries = []
+    for c in changes:
+        hostname = c["hostname"]
+        comment_tag = f"dns:{hostname}"
+        new_routes_for_host = [
+            {"network": f"{ip}/32", "comment": comment_tag, "nat": default_nat}
+            for ip in c["new_ips"]
+        ]
+        change_entries.append({
+            "hostname": hostname,
+            "old_ips": c["old_ips"],
+            "new_ips": c["new_ips"],
+            "routes": new_routes_for_host,
+        })
+
     pending = {
-        "routes": new_routes_all,
-        "changes": changes,
+        "entries": change_entries,
         "server_name": server_name,
     }
 
@@ -281,7 +296,7 @@ def main():
         try:
             with open(pending_file) as f:
                 existing = json.load(f)
-            if existing.get("routes") == new_routes_all:
+            if existing.get("entries") == change_entries:
                 log.info("Changes already pending — re-sending notification")
                 if slack_webhook:
                     try:
@@ -290,8 +305,7 @@ def main():
                     except Exception as e:
                         log.error("Failed to re-send Slack notification: %s", e)
                 return
-            log.warning("Pending file exists with different routes — skipping to avoid race (wait for current approval/rejection)")
-            return
+            log.info("Pending file exists but changes differ — updating")
         except (json.JSONDecodeError, IOError):
             log.warning("Could not read existing pending file — will overwrite")
 

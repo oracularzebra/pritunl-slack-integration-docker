@@ -281,26 +281,17 @@ def slack_command():
     routes = server.get("routes", [])
 
     if command == "list":
+        lines = [f"*Routes for {get_server_name()}* ({len(routes)} total)"]
+        for r in routes:
+            lines.append(f"`{r['network']}`  — {r.get('comment', '')}  (nat={r.get('nat', True)})")
+        text = "\n".join(lines)
         blocks = [
             {
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Routes for {get_server_name()}* ({len(routes)} total)",
-                },
+                "text": {"type": "mrkdwn", "text": text[:3000]},
             }
         ]
-        for r in routes:
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"`{r['network']}`  — {r.get('comment', '')}  (nat={r.get('nat', True)})",
-                    },
-                }
-            )
-        return jsonify({"response_type": "in_channel", "blocks": blocks})
+        return jsonify({"response_type": "in_channel", "text": text[:3000], "blocks": blocks})
 
     elif command == "add":
         if len(parts) < 2:
@@ -426,17 +417,26 @@ def _handle_approve(pending_file, response_url, user_name):
         with open(pending_file) as f:
             pending = json.load(f)
 
-        changes = pending.get("changes", [])
+        entries = pending.get("entries", [])
         lines = [f"✅ *Route changes approved by {user_name} and applied.*"]
-        for c in changes:
-            hostname = c["hostname"]
-            old = ", ".join(c.get("old_ips", [])) or "(none)"
-            new = ", ".join(c.get("new_ips", []))
+        for e in entries:
+            hostname = e["hostname"]
+            old = ", ".join(e.get("old_ips", [])) or "(none)"
+            new = ", ".join(e.get("new_ips", []))
             lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
+
+        server = get_server()
+        existing_routes = server.get("routes", [])
+
+        for e in entries:
+            hostname = e["hostname"]
+            comment_tag = f"dns:{hostname}"
+            existing_routes = [r for r in existing_routes if r.get("comment") != comment_tag]
+            existing_routes.extend(e.get("routes", []))
 
         collection.update_one(
             {"name": get_server_name()},
-            {"$set": {"routes": pending["routes"]}},
+            {"$set": {"routes": existing_routes}},
         )
 
         from update_routes import restart_openvpn as do_restart
@@ -464,12 +464,12 @@ def _handle_reject(pending_file, response_url, user_name):
             state = json.load(f)
         os.remove(pending_file)
 
-        changes = state.get("changes", [])
+        entries = state.get("entries", [])
         lines = [f"❌ *Route changes rejected by {user_name}.*"]
-        for c in changes:
-            hostname = c["hostname"]
-            old = ", ".join(c.get("old_ips", [])) or "(none)"
-            new = ", ".join(c.get("new_ips", []))
+        for e in entries:
+            hostname = e["hostname"]
+            old = ", ".join(e.get("old_ips", [])) or "(none)"
+            new = ", ".join(e.get("new_ips", []))
             lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
         _update_slack(response_url, "\n\n".join(lines))
         log.info("Route changes rejected by %s", user_name)
