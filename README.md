@@ -56,7 +56,7 @@ The container runs both the webhook server (port 5001) and the poller (every 10s
 - Docker & Docker Compose
 - Access to the Pritunl MongoDB instance
 - (Optional) Slack incoming webhook URL
-- Privileged access on the Pritunl host (for OpenVPN restart)
+- Privileged access on the Pritunl host if this container should restart OpenVPN/Pritunl automatically
 
 ### Running with Docker Compose
 
@@ -68,6 +68,10 @@ services:
     restart: unless-stopped
     ports:
       - "5001:5001"
+    # Required only when this container should restart host OpenVPN/Pritunl.
+    # This grants broad host process access; omit it if restarts are handled externally.
+    pid: host
+    privileged: true
     environment:
       - CONFIG_PATH=/app/config.json
       - MONGODB_URI=mongodb://host.docker.internal:27017
@@ -75,13 +79,15 @@ services:
       - POLLER_INTERVAL=10
     volumes:
       - ./config.json:/app/config.json:ro
-      - ./hostnames.json:/app/hostnames.json:ro
+      - ./hostnames.json:/app/hostnames.json
       - pending_data:/tmp
 ```
 
+`hostnames.json` must be writable for `/routes watch`, `/routes unwatch`, and rejected hostname changes. If you omit `pid: host` or `privileged: true`, route updates can still be written to MongoDB, but automatic OpenVPN/Pritunl restart will not be able to signal host processes.
+
 ### Running with Docker Run (privileged)
 
-For OpenVPN restart to work, the container needs host PID namespace and /proc access.
+For OpenVPN restart to work, the container needs host PID namespace and permission to signal host processes.
 
 If MongoDB is bound to `127.0.0.1` on the host (common for Pritunl), use `--network=host` so the container's `localhost` maps to the host's loopback. With `--network=host`, `MONGODB_URI` should use `localhost` and port mapping (`-p`) is not needed — the app listens on the host's IP directly.
 
@@ -107,6 +113,7 @@ docker run -d --name pritunl-slack \
 | `SLACK_WEBHOOK_URL` | `""` | Slack incoming webhook URL |
 | `POLLER_INTERVAL` | `10` | Poller loop interval in seconds |
 | `LOG_DIR` | `/var/log/pritunl-docker` | Directory for Python script logs (route-updater.log, webhook-server.log) |
+| `OPENVPN_RESTART_CMD` | `sudo systemctl restart pritunl` | Restart command used when config does not set `openvpn_restart_cmd` |
 
 ### Building the Image
 
@@ -120,10 +127,12 @@ docker build -t pritunl-slack .
 2. For each hostname, resolves DNS to current IPs
 3. Compares with existing routes in MongoDB (matched by `comment: "dns:<hostname>"`)
 4. If any hostname's IPs changed, saves only the changed entries to `pending_routes.json` and sends an interactive Slack message with **Approve** / **Reject** buttons
-5. Clicking **Approve** merges the pending routes into MongoDB (replaces old routes for each changed hostname, appends new ones), restarts OpenVPN, and removes the pending file
-6. Clicking **Reject** removes the pending file **and unwatch the rejected hostnames** from `hostnames.json` — the poller stops tracking them
-7. Only routes matching tracked hostnames are touched — other routes are left intact
-8. If changes match what's already pending, the poller re-sends the notification instead of creating duplicates
+5. Clicking **Approve** merges the pending routes into MongoDB (replaces old routes for each changed hostname, appends new ones), restarts OpenVPN/Pritunl, and removes the pending file
+6. Duplicate or stale Approve/Reject callbacks are ignored after the pending file has already been handled, so they do not overwrite the successful Slack message
+7. Clicking **Reject** removes the pending file **and unwatch the rejected hostnames** from `hostnames.json` — the poller stops tracking them
+8. Only routes matching tracked hostnames are touched — other routes are left intact
+9. If changes match what's already pending, the poller re-sends the notification instead of creating duplicates
+10. Direct Slack route mutations (`/routes add`, `/routes delete`, and route-removing `/routes unwatch`) update MongoDB and trigger the configured restart path immediately
 
 ## Configuration
 
@@ -154,7 +163,7 @@ docker build -t pritunl-slack .
 
 ## Restart Mode
 
-Pritunl manages OpenVPN as a child process. The `restart_mode` field controls how routes are applied:
+Pritunl manages OpenVPN as a child process. The `restart_mode` field controls how routes are applied. Restarts are triggered after approved DNS route changes and after direct Slack route mutations that change MongoDB routes.
 
 **`openvpn_only` (default):**
 1. Kills the OpenVPN child process(es) with SIGTERM
@@ -163,7 +172,9 @@ Pritunl manages OpenVPN as a child process. The `restart_mode` field controls ho
 
 **`full`:**
 1. Runs `systemctl restart pritunl` directly
-2. Longer downtime but guaranteed to work
+2. Longer downtime but more direct than killing OpenVPN children
+
+If logs show `No Pritunl parent process found`, `No OpenVPN child process was killed`, or permission errors, the container cannot see or signal the host Pritunl/OpenVPN process. Run with host PID access and sufficient privileges, or set `restart_mode` to `full` with an `openvpn_restart_cmd` that works from inside the container.
 
 ## API Endpoints
 
@@ -189,11 +200,11 @@ Pritunl manages OpenVPN as a child process. The `restart_mode` field controls ho
 
 ```
 /routes list              — show all routes
-/routes add 10.0.0.0/16   — add a route
-/routes delete 10.0.0.0/16 — delete a route
+/routes add 10.0.0.0/16   — add a route and trigger restart
+/routes delete 10.0.0.0/16 — delete a route and trigger restart
 /routes hostnames          — list tracked hostnames
-/routes watch my-alb.elb.amazonaws.com    — start tracking
-/routes unwatch my-alb.elb.amazonaws.com  — stop tracking and remove routes
+/routes watch my-alb.elb.amazonaws.com    — start tracking; poller creates pending routes for approval
+/routes unwatch my-alb.elb.amazonaws.com  — stop tracking, remove routes, and trigger restart when routes were removed
 ```
 
 > **Approve/Reject:** When IPs change, the poller sends an interactive message. **Approve** merges the new routes into MongoDB. **Reject** removes the hostname from `hostnames.json` so the poller stops tracking it.
