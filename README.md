@@ -119,11 +119,11 @@ docker build -t pritunl-slack .
 1. Reads tracked hostnames from `hostnames.json`
 2. For each hostname, resolves DNS to current IPs
 3. Compares with existing routes in MongoDB (matched by `comment: "dns:<hostname>"`)
-4. If any hostname's IPs changed, saves pending routes to a file and sends an interactive Slack message with **Approve** / **Reject** buttons
-5. Clicking **Approve** applies the new routes to MongoDB, restarts OpenVPN, and removes the pending file
-6. Clicking **Reject** removes the pending file — the poller will notify again on the next cycle if the same change is still detected
+4. If any hostname's IPs changed, saves only the changed entries to `pending_routes.json` and sends an interactive Slack message with **Approve** / **Reject** buttons
+5. Clicking **Approve** merges the pending routes into MongoDB (replaces old routes for each changed hostname, appends new ones), restarts OpenVPN, and removes the pending file
+6. Clicking **Reject** removes the pending file **and unwatch the rejected hostnames** from `hostnames.json` — the poller stops tracking them
 7. Only routes matching tracked hostnames are touched — other routes are left intact
-8. The poller will not overwrite a pending file with different routes (avoids race where approval reads wrong data). If changes match what's already pending, it re-sends the notification instead of skipping
+8. If changes match what's already pending, the poller re-sends the notification instead of creating duplicates
 
 ## Configuration
 
@@ -193,8 +193,10 @@ Pritunl manages OpenVPN as a child process. The `restart_mode` field controls ho
 /routes delete 10.0.0.0/16 — delete a route
 /routes hostnames          — list tracked hostnames
 /routes watch my-alb.elb.amazonaws.com    — start tracking
-/routes unwatch my-alb.elb.amazonaws.com  — stop tracking
+/routes unwatch my-alb.elb.amazonaws.com  — stop tracking and remove routes
 ```
+
+> **Approve/Reject:** When IPs change, the poller sends an interactive message. **Approve** merges the new routes into MongoDB. **Reject** removes the hostname from `hostnames.json` so the poller stops tracking it.
 
 > Input is sanitised automatically — backticks, asterisks, underscores, quotes, and `https://` prefixes are stripped so you can paste hostnames directly from Slack messages without worrying about formatting.
 
