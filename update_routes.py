@@ -10,6 +10,7 @@ from copy import deepcopy
 
 import requests
 from pymongo import MongoClient
+import dns.resolver
 
 log_dir = os.environ.get("LOG_DIR")
 if log_dir:
@@ -25,9 +26,19 @@ log = logging.getLogger(__name__)
 
 
 def resolve_ips(hostname):
-    _, _, ips = socket.gethostbyname_ex(hostname)
-    ips.sort()
-    return ips
+    try:
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ["8.8.8.8", "8.8.4.4"]
+        answers = resolver.resolve(hostname, "A")
+        ips = sorted(set(r.address for r in answers))
+        return ips
+    except dns.resolver.NoAnswer:
+        return []
+    except dns.resolver.NXDOMAIN:
+        return []
+    except Exception as e:
+        log.warning("  DNS resolution failed for %s: %s", hostname, e)
+        return []
 
 
 def get_mongo_collection(config):
