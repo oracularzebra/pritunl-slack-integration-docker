@@ -32,6 +32,7 @@ _loaded = False
 _config_path = None
 _hostnames_path = None
 _hostnames = []
+_pending_lock = threading.Lock()
 
 
 def _default_hostnames_path():
@@ -127,6 +128,28 @@ def _check_channel(channel_id):
 
 def get_server_name():
     return config.get("server_name", "unknown")
+
+
+def _restart_configured_openvpn():
+    from update_routes import restart_openvpn as do_restart
+
+    restart_mode = config.get("restart_mode", "openvpn_only")
+    restart_cmd = config.get(
+        "openvpn_restart_cmd",
+        os.environ.get("OPENVPN_RESTART_CMD", "sudo systemctl restart pritunl"),
+    )
+    do_restart(restart_mode, restart_cmd)
+
+
+def _trigger_restart_async(reason):
+    def _run():
+        try:
+            log.info("Restart triggered after %s", reason)
+            _restart_configured_openvpn()
+        except Exception as e:
+            log.error("Restart failed after %s: %s", reason, e)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _sanitize(text):
@@ -304,7 +327,8 @@ def slack_command():
         collection.update_one(
             {"name": get_server_name()}, {"$set": {"routes": routes}}
         )
-        return jsonify({"response_type": "in_channel", "text": f"Route `{network}` added."})
+        _trigger_restart_async(f"route add {network}")
+        return jsonify({"response_type": "in_channel", "text": f"Route `{network}` added. Restart triggered."})
 
     elif command == "delete":
         if len(parts) < 2:
@@ -316,7 +340,8 @@ def slack_command():
         collection.update_one(
             {"name": get_server_name()}, {"$set": {"routes": new_routes}}
         )
-        return jsonify({"response_type": "in_channel", "text": f"Route `{network}` deleted."})
+        _trigger_restart_async(f"route delete {network}")
+        return jsonify({"response_type": "in_channel", "text": f"Route `{network}` deleted. Restart triggered."})
 
     elif command == "hostnames":
         lines = [f"*Tracked hostnames ({len(_hostnames)}):*"]
@@ -353,8 +378,10 @@ def slack_command():
                 {"name": get_server_name()}, {"$set": {"routes": new_routes}}
             )
             log.info("Removed %d route(s) for %s", removed, hostname)
+            _trigger_restart_async(f"unwatch {hostname}")
 
-        return jsonify({"response_type": "in_channel", "text": f"Stopped watching `{hostname}`. Removed {removed} route(s)."})
+        restart_text = " Restart triggered." if removed else ""
+        return jsonify({"response_type": "in_channel", "text": f"Stopped watching `{hostname}`. Removed {removed} route(s).{restart_text}"})
 
     else:
         return jsonify({
@@ -408,93 +435,90 @@ def slack_interactive():
 
 def _handle_approve(pending_file, response_url, user_name):
     pending_file = pending_file or config.get("pending_file", "/tmp/pending_routes.json")
-    try:
-        _update_slack(response_url, f"⏳ *Approval by {user_name} in progress — updating routes...*")
+    with _pending_lock:
+        try:
+            with open(pending_file) as f:
+                pending = json.load(f)
 
-        with open(pending_file) as f:
-            pending = json.load(f)
+            _update_slack(response_url, f"⏳ *Approval by {user_name} in progress — updating routes...*")
 
-        entries = pending.get("entries", [])
-        lines = [f"✅ *Route changes approved by {user_name} and applied.*"]
-        for e in entries:
-            hostname = e["hostname"]
-            old = ", ".join(e.get("old_ips", [])) or "(none)"
-            new = ", ".join(e.get("new_ips", []))
-            lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
+            entries = pending.get("entries", [])
+            lines = [f"✅ *Route changes approved by {user_name} and applied.*"]
+            for e in entries:
+                hostname = e["hostname"]
+                old = ", ".join(e.get("old_ips", [])) or "(none)"
+                new = ", ".join(e.get("new_ips", []))
+                lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
 
-        server = get_server()
-        existing_routes = server.get("routes", [])
+            server = get_server()
+            existing_routes = server.get("routes", [])
 
-        for e in entries:
-            hostname = e["hostname"]
-            comment_tag = f"dns:{hostname}"
-            existing_routes = [r for r in existing_routes if r.get("comment") != comment_tag]
-            existing_routes.extend(e.get("routes", []))
+            for e in entries:
+                hostname = e["hostname"]
+                comment_tag = f"dns:{hostname}"
+                existing_routes = [r for r in existing_routes if r.get("comment") != comment_tag]
+                existing_routes.extend(e.get("routes", []))
 
-        collection.update_one(
-            {"name": get_server_name()},
-            {"$set": {"routes": existing_routes}},
-        )
+            collection.update_one(
+                {"name": get_server_name()},
+                {"$set": {"routes": existing_routes}},
+            )
 
-        from update_routes import restart_openvpn as do_restart
-        restart_mode = config.get("restart_mode", "openvpn_only")
-        restart_cmd = config.get("openvpn_restart_cmd", "sudo systemctl restart pritunl")
-        do_restart(restart_mode, restart_cmd)
+            _restart_configured_openvpn()
 
-        os.remove(pending_file)
-        _update_slack(response_url, "\n\n".join(lines))
-        log.info("Route changes approved by %s", user_name)
-    except FileNotFoundError:
-        log.warning("Pending file vanished before approval could complete")
-        _update_slack(response_url, "❌ No pending changes found (they were already applied or rejected).")
-    except Exception as e:
-        log.error("Approve failed: %s", e)
-        _update_slack(response_url, f"❌ Approval failed: {e}")
+            os.remove(pending_file)
+            _update_slack(response_url, "\n\n".join(lines))
+            log.info("Route changes approved by %s", user_name)
+        except FileNotFoundError:
+            log.warning("Pending file vanished before approval could complete")
+        except Exception as e:
+            log.error("Approve failed: %s", e)
+            _update_slack(response_url, f"❌ Approval failed: {e}")
 
 
 def _handle_reject(pending_file, response_url, user_name):
     pending_file = pending_file or config.get("pending_file", "/tmp/pending_routes.json")
-    try:
-        _update_slack(response_url, f"⏳ *Rejection by {user_name} in progress...*")
+    with _pending_lock:
+        try:
+            with open(pending_file) as f:
+                state = json.load(f)
 
-        with open(pending_file) as f:
-            state = json.load(f)
-        os.remove(pending_file)
+            _update_slack(response_url, f"⏳ *Rejection by {user_name} in progress...*")
+            os.remove(pending_file)
 
-        entries = state.get("entries", [])
-        removed_hostnames = []
-        for e in entries:
-            hostname = e["hostname"]
-            if hostname in _hostnames:
-                _hostnames.remove(hostname)
-                removed_hostnames.append(hostname)
-        if removed_hostnames:
-            _write_hostnames()
-            log.info("Removed rejected hostnames from watch list: %s", removed_hostnames)
+            entries = state.get("entries", [])
+            removed_hostnames = []
+            for e in entries:
+                hostname = e["hostname"]
+                if hostname in _hostnames:
+                    _hostnames.remove(hostname)
+                    removed_hostnames.append(hostname)
+            if removed_hostnames:
+                _write_hostnames()
+                log.info("Removed rejected hostnames from watch list: %s", removed_hostnames)
 
-        lines = [f"❌ *Route changes rejected by {user_name}.*"]
-        for e in entries:
-            hostname = e["hostname"]
-            old = ", ".join(e.get("old_ips", [])) or "(none)"
-            new = ", ".join(e.get("new_ips", []))
-            lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
-        _update_slack(response_url, "\n\n".join(lines))
-        log.info("Route changes rejected by %s", user_name)
-    except FileNotFoundError:
-        log.warning("Pending file vanished before rejection could complete")
-        _update_slack(response_url, "❌ No pending changes found (they were already applied or rejected).")
-    except Exception as e:
-        log.error("Reject failed: %s", e)
-        _update_slack(response_url, f"❌ Rejection failed: {e}")
+            lines = [f"❌ *Route changes rejected by {user_name}.*"]
+            for e in entries:
+                hostname = e["hostname"]
+                old = ", ".join(e.get("old_ips", [])) or "(none)"
+                new = ", ".join(e.get("new_ips", []))
+                lines.append(f"• `{hostname}`\n  Old: `{old}`\n  New: `{new}`")
+            _update_slack(response_url, "\n\n".join(lines))
+            log.info("Route changes rejected by %s", user_name)
+        except FileNotFoundError:
+            log.warning("Pending file vanished before rejection could complete")
+        except Exception as e:
+            log.error("Reject failed: %s", e)
+            _update_slack(response_url, f"❌ Rejection failed: {e}")
 
 
-def _update_slack(response_url, text):
+def _update_slack(response_url, text, replace_original=True):
     if not response_url:
         return
     try:
         requests.post(response_url, json={
-            "text": None,
-            "replace_original": True,
+            "text": text,
+            "replace_original": replace_original,
             "blocks": [
                 {
                     "type": "section",

@@ -5,7 +5,6 @@ import time
 import socket
 import logging
 import argparse
-import subprocess
 from copy import deepcopy
 
 import requests
@@ -53,41 +52,76 @@ def get_mongo_collection(config):
     return client[db_name]["servers"]
 
 
+def _iter_proc_pids():
+    try:
+        names = os.listdir("/proc")
+    except FileNotFoundError:
+        log.warning("/proc is not available; cannot inspect Pritunl processes")
+        return
+
+    for name in names:
+        if name.isdigit():
+            yield int(name)
+
+
+def _read_cmdline(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read().decode(errors="ignore").replace("\0", " ").strip()
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return ""
+
+
+def _read_ppid(pid):
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("PPid:"):
+                    return int(line.split()[1])
+    except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
+        return None
+    return None
+
+
 def get_pritunl_pids():
-    result = subprocess.run(
-        ["pgrep", "-f", "/usr/lib/pritunl.*pritunl start"],
-        capture_output=True, text=True, timeout=10,
-    )
-    return [int(p) for p in result.stdout.strip().split() if p]
+    pids = []
+    for pid in _iter_proc_pids():
+        cmdline = _read_cmdline(pid)
+        if "pritunl start" in cmdline and "openvpn" not in cmdline:
+            pids.append(pid)
+    return pids
 
 
 def get_openvpn_child_pids(parent_pid):
-    result = subprocess.run(
-        ["pgrep", "-P", str(parent_pid)],
-        capture_output=True, text=True, timeout=10,
-    )
-    children = [int(p) for p in result.stdout.strip().split() if p]
     openvpn_pids = []
-    for pid in children:
-        try:
-            cmdline = open(f"/proc/{pid}/cmdline", "rb").read().decode().replace("\0", " ")
-            if "openvpn" in cmdline:
-                openvpn_pids.append(pid)
-        except (FileNotFoundError, ProcessLookupError):
-            pass
+    for pid in _iter_proc_pids():
+        if _read_ppid(pid) != parent_pid:
+            continue
+        if "openvpn" in _read_cmdline(pid):
+            openvpn_pids.append(pid)
     return openvpn_pids
+
+
+def _run_restart_command(restart_cmd):
+    ret = os.system(restart_cmd)
+    if ret != 0:
+        log.warning("Restart command returned exit code %d", ret)
+    return ret == 0
 
 
 def restart_openvpn(mode, restart_cmd):
     if mode == "full":
         log.info("Full Pritunl restart: %s", restart_cmd)
-        ret = os.system(restart_cmd)
-        if ret != 0:
-            log.warning("Restart command returned exit code %d", ret)
+        _run_restart_command(restart_cmd)
         return
 
     log.info("Killing OpenVPN child processes (Pritunl should respawn)...")
     pids = get_pritunl_pids()
+    if not pids:
+        log.warning("No Pritunl parent process found. Falling back to full Pritunl restart.")
+        _run_restart_command(restart_cmd)
+        return
+
     killed = []
     for ppid in pids:
         for ovpn_pid in get_openvpn_child_pids(ppid):
@@ -97,6 +131,13 @@ def restart_openvpn(mode, restart_cmd):
                 killed.append(ovpn_pid)
             except ProcessLookupError:
                 pass
+            except PermissionError as e:
+                log.warning("  No permission to kill OpenVPN PID %d: %s", ovpn_pid, e)
+
+    if not killed:
+        log.warning("No OpenVPN child process was killed. Falling back to full Pritunl restart.")
+        _run_restart_command(restart_cmd)
+        return
 
     time.sleep(3)
 
@@ -105,7 +146,7 @@ def restart_openvpn(mode, restart_cmd):
         alive.extend(get_openvpn_child_pids(ppid))
     if not alive:
         log.warning("OpenVPN did not respawn. Falling back to full Pritunl restart.")
-        os.system(restart_cmd)
+        _run_restart_command(restart_cmd)
     else:
         log.info("OpenVPN respawned (PIDs: %s)", alive)
 
