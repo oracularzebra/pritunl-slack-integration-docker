@@ -465,6 +465,16 @@ def _handle_reject(pending_file, response_url, user_name):
         os.remove(pending_file)
 
         entries = state.get("entries", [])
+        removed_hostnames = []
+        for e in entries:
+            hostname = e["hostname"]
+            if hostname in _hostnames:
+                _hostnames.remove(hostname)
+                removed_hostnames.append(hostname)
+        if removed_hostnames:
+            _write_hostnames()
+            log.info("Removed rejected hostnames from watch list: %s", removed_hostnames)
+
         lines = [f"❌ *Route changes rejected by {user_name}.*"]
         for e in entries:
             hostname = e["hostname"]
