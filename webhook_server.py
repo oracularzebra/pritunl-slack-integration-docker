@@ -33,6 +33,39 @@ _config_path = None
 _hostnames_path = None
 _hostnames = []
 _pending_lock = threading.Lock()
+SLACK_SECTION_MAX_CHARS = 2900
+SLACK_MAX_BLOCKS = 50
+
+
+def _section_block(text):
+    return {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": text},
+    }
+
+
+def _section_blocks_from_lines(lines):
+    blocks = []
+    chunk = []
+
+    for line in lines:
+        line = str(line)
+        if len(line) > SLACK_SECTION_MAX_CHARS:
+            line = line[: SLACK_SECTION_MAX_CHARS - 3] + "..."
+
+        candidate = "\n".join(chunk + [line])
+        if chunk and len(candidate) > SLACK_SECTION_MAX_CHARS:
+            blocks.append(_section_block("\n".join(chunk)))
+            chunk = [line]
+            if len(blocks) >= SLACK_MAX_BLOCKS:
+                break
+        else:
+            chunk.append(line)
+
+    if chunk and len(blocks) < SLACK_MAX_BLOCKS:
+        blocks.append(_section_block("\n".join(chunk)))
+
+    return blocks
 
 
 def _default_hostnames_path():
@@ -305,13 +338,12 @@ def slack_command():
         for r in routes:
             lines.append(f"`{r['network']}`  — {r.get('comment', '')}  (nat={r.get('nat', True)})")
         text = "\n".join(lines)
-        blocks = [
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": text[:3000]},
-            }
-        ]
-        return jsonify({"response_type": "in_channel", "text": text[:3000], "blocks": blocks})
+        blocks = _section_blocks_from_lines(lines)
+        return jsonify({
+            "response_type": "in_channel",
+            "text": text,
+            "blocks": blocks,
+        })
 
     elif command == "add":
         if len(parts) < 2:
