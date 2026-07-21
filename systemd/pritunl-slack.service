@@ -1,0 +1,21 @@
+[Unit]
+Description=Pritunl Slack Integration container
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/pritunl-slack-integration-docker
+ExecStartPre=/usr/bin/test -f /root/pritunl-slack-integration-docker/config.json
+ExecStartPre=/usr/bin/test -f /root/pritunl-slack-integration-docker/hostnames.json
+ExecStartPre=/usr/bin/mkdir -p /var/log/pritunl-docker
+ExecStartPre=-/usr/bin/docker rm -f pritunl-slack
+ExecStart=/usr/bin/docker run -d --name pritunl-slack --network=host --pid=host --privileged --mount type=bind,source=/proc,target=/proc,readonly --mount type=bind,source=/root/pritunl-slack-integration-docker/config.json,target=/app/config.json,readonly --mount type=bind,source=/root/pritunl-slack-integration-docker/hostnames.json,target=/app/hostnames.json --mount type=bind,source=/var/log/pritunl-docker,target=/var/log/pritunl-docker pritunl-slack:2.4
+ExecStop=-/usr/bin/docker stop pritunl-slack
+ExecStopPost=-/usr/bin/docker rm pritunl-slack
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
