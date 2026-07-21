@@ -121,6 +121,31 @@ docker run -d --name pritunl-slack \
 docker build -t pritunl-slack .
 ```
 
+### Start on System Boot
+
+This repo includes a systemd unit that recreates the `pritunl-slack:2.4` container after Docker starts. The unit expects the repo files at `/root/pritunl-slack-integration-docker`:
+
+```bash
+sudo cp systemd/pritunl-slack.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable pritunl-slack.service
+sudo systemctl start pritunl-slack.service
+```
+
+Check status and logs:
+
+```bash
+sudo systemctl status pritunl-slack.service
+docker logs pritunl-slack
+```
+
+If the service fails to start, check whether the bind-mount files exist on the host:
+
+```bash
+sudo test -f /root/pritunl-slack-integration-docker/config.json
+sudo test -f /root/pritunl-slack-integration-docker/hostnames.json
+```
+
 ## How It Works
 
 1. Reads tracked hostnames from `hostnames.json`
